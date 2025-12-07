@@ -9,9 +9,7 @@ description = "AI-powered security scanner with CVE intelligence"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [
-    {name = "Sai Mani", email = "psmk212004@gmail.com"}
-]
+authors = [{name = "Sai Mani", email = "psmk212004@gmail.com"}]
 keywords = ["security", "sast", "ai", "llm", "vulnerability", "scanning", "cve"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -29,6 +27,7 @@ dependencies = [
     "requests>=2.31.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
+    "semgrep>=1.45.0",
 ]
 
 [project.optional-dependencies]
