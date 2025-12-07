@@ -14,19 +14,21 @@ from ..utils.logger import get_logger, setup_logging
 from ..utils.config import Config, init_config
 from ..utils.exceptions import SecureScanError, ConfigError, ScanError
 from ..version import VERSION
-from securescan.cli.setup import setup as setup_cmd
-
-# Register setup command
 
 try:
     from dotenv import load_dotenv
     load_dotenv()  # Auto-load .env from current directory
 except ImportError:
-    pass  
+    pass
+
 console = Console()
 logger = get_logger(__name__)
 
-cli.add_command(setup_cmd, name='setup')
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MAIN CLI GROUP
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 @click.group()
 @click.version_option(version=VERSION, prog_name="SecureScan AI")
 @click.option(
@@ -62,6 +64,9 @@ def cli(ctx, config, verbose, log_file):
         
         # Complete pipeline
         secscan scan . --llm openai --enrich-cve
+        
+        # Setup API keys
+        secscan setup
         
         # Show configuration
         secscan config show
@@ -104,6 +109,10 @@ def cli(ctx, config, verbose, log_file):
         sys.exit(1)
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SCAN COMMAND
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 @cli.command()
 @click.argument(
     "target",
@@ -120,7 +129,7 @@ def cli(ctx, config, verbose, log_file):
 @click.option(
     "--output",
     "-o",
-    type=click.Choice(["console", "json"], case_sensitive=False),
+    type=click.Choice(["console", "json", "sarif"], case_sensitive=False),
     default="console",
     help="Output format (default: console)",
 )
@@ -128,7 +137,7 @@ def cli(ctx, config, verbose, log_file):
     "--output-file",
     "-f",
     type=click.Path(),
-    help="Write output to file (only for json format)",
+    help="Write output to file",
 )
 @click.option(
     "--max-findings",
@@ -196,10 +205,10 @@ def scan(
     
     \b
     Examples:
-        # Basic scan
+        # Basic scan (free, no API keys needed)
         secscan scan .
         
-        # With AI validation (reduces false positives by 40%)
+        # With AI validation (reduces false positives by 40-60%)
         secscan scan ./src --llm openai
         
         # With CVE enrichment (adds threat intelligence)
@@ -214,8 +223,19 @@ def scan(
         # JSON output to file
         secscan scan ./src --output json --output-file results.json
         
+        # SARIF output for GitHub Security
+        secscan scan ./src --output sarif --output-file results.sarif
+        
         # Strict mode (fail on MEDIUM+)
         secscan scan ./src --fail-on MEDIUM
+    
+    \b
+    Exit Codes:
+        0 - No issues or below fail threshold
+        1 - HIGH severity found
+        2 - CRITICAL severity found
+        3 - Scan error
+        130 - User interrupted
     """
     cfg = ctx.obj.get("config", Config())
     verbose = ctx.obj.get("verbose", False)
@@ -290,6 +310,8 @@ def scan(
         # Handle output format
         if output == "json":
             _output_json(result, output_file)
+        elif output == "sarif":
+            _output_sarif(result, output_file)
         else:
             _output_console(result, max_findings)
         
@@ -325,6 +347,10 @@ def scan(
         logger.error(f"Unexpected error: {e}", exc_info=True)
         sys.exit(3)
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# HELPER FUNCTIONS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _determine_exit_code(result, fail_on: str) -> int:
     """
@@ -367,7 +393,16 @@ def _determine_exit_code(result, fail_on: str) -> int:
 def _output_console(result, max_findings: int):
     """Display results in rich console format."""
     
-    # === SUMMARY SECTION ===
+    # Import output formatter if available
+    try:
+        from .output import format_scan_results
+        output_str = format_scan_results(result, max_findings)
+        console.print(output_str)
+        return
+    except ImportError:
+        pass
+    
+    # Fallback to inline formatting
     console.print()
     console.print("[bold]" + "="*70 + "[/bold]")
     console.print("[bold cyan]SCAN SUMMARY[/bold cyan]")
@@ -386,99 +421,32 @@ def _output_console(result, max_findings: int):
             console.print(f"[red]  • {error}[/red]")
         return
     
-    # === LLM VALIDATION STATS ===
-    if "llm_validation" in result.config:
-        llm_stats = result.config["llm_validation"]
+    # Severity breakdown
+    if result.findings_by_severity:
         console.print()
-        console.print("[bold]" + "─"*70 + "[/bold]")
-        console.print("[bold green]🤖 AI VALIDATION RESULTS[/bold green]")
-        console.print("[bold]" + "─"*70 + "[/bold]")
-        console.print()
+        severity_table = Table(title="Findings by Severity", show_header=True)
+        severity_table.add_column("Severity", style="bold")
+        severity_table.add_column("Count", justify="right")
         
-        console.print(f"[bold]Provider:[/bold] {llm_stats['provider']}/{llm_stats['model']}")
-        console.print(f"[bold]Original Findings:[/bold] {llm_stats['original_findings']}")
-        console.print(f"[bold]Validated:[/bold] {llm_stats['validated']}")
-        console.print(f"[bold]Confirmed Vulnerable:[/bold] [red]{llm_stats['confirmed_vulnerable']}[/red]")
-        console.print(f"[bold]False Positives:[/bold] [green]{llm_stats['false_positives']}[/green]")
-        console.print(f"[bold]Avg Confidence:[/bold] {llm_stats['avg_confidence']:.2f}")
-        console.print(f"[bold]Total Tokens:[/bold] {llm_stats['total_tokens']:,}")
-        console.print(f"[bold]Cost:[/bold] ${llm_stats['total_cost_usd']:.4f}")
+        severity_colors = {
+            "CRITICAL": "bold red",
+            "HIGH": "red",
+            "MEDIUM": "yellow",
+            "LOW": "blue",
+            "INFO": "dim",
+        }
         
-        if llm_stats['failed'] > 0:
-            console.print(f"[bold yellow]Failed:[/bold yellow] {llm_stats['failed']}")
+        for severity, count in result.findings_by_severity.items():
+            if count > 0:
+                color = severity_colors.get(severity, "white")
+                severity_table.add_row(
+                    f"[{color}]{severity}[/{color}]",
+                    f"[{color}]{count}[/{color}]"
+                )
         
-        if llm_stats['original_findings'] > 0:
-            reduction = (llm_stats['false_positives'] / llm_stats['original_findings']) * 100
-            console.print()
-            console.print(f"[bold green]✨ False Positive Reduction: {reduction:.1f}%[/bold green]")
+        console.print(severity_table)
     
-    # === CVE ENRICHMENT STATS ===
-    if "cve_enrichment" in result.config and "error" not in result.config["cve_enrichment"]:
-        cve_stats = result.config["cve_enrichment"]
-        console.print()
-        console.print("[bold]" + "─"*70 + "[/bold]")
-        console.print("[bold cyan]📋 CVE INTELLIGENCE[/bold cyan]")
-        console.print("[bold]" + "─"*70 + "[/bold]")
-        console.print()
-        
-        console.print(f"[bold]Enriched Findings:[/bold] {cve_stats['enriched_findings']}")
-        console.print(f"[bold]Total CVEs:[/bold] {cve_stats['total_cves_found']}")
-        console.print(f"[bold]Avg CVEs per Finding:[/bold] {cve_stats['avg_cves_per_finding']:.1f}")
-        
-        if cve_stats['findings_in_cisa_kev'] > 0:
-            console.print(f"[bold red]🚨 CISA KEV:[/bold red] {cve_stats['findings_in_cisa_kev']} (actively exploited!)")
-        else:
-            console.print(f"[bold]CISA KEV:[/bold] 0")
-        
-        if cve_stats['findings_with_exploits'] > 0:
-            console.print(f"[bold yellow]💥 With Exploits:[/bold yellow] {cve_stats['findings_with_exploits']}")
-        else:
-            console.print(f"[bold]With Exploits:[/bold] 0")
-        
-        if cve_stats.get('avg_cvss'):
-            console.print(f"[bold]Avg CVSS:[/bold] {cve_stats['avg_cvss']:.1f}/10")
-            console.print(f"[bold]Max CVSS:[/bold] {cve_stats['max_cvss']:.1f}/10")
-        
-        threat_levels = cve_stats.get('threat_levels', {})
-        if any(threat_levels.values()):
-            console.print()
-            console.print("[bold]Threat Levels:[/bold]")
-            for level, count in threat_levels.items():
-                if count > 0:
-                    colors = {
-                        "CRITICAL": "bold red",
-                        "HIGH": "red",
-                        "MEDIUM": "yellow",
-                        "LOW": "green",
-                    }
-                    color = colors.get(level, "white")
-                    console.print(f"  [{color}]●[/{color}] {level}: {count}")
-    
-    # === SEVERITY BREAKDOWN ===
-    console.print()
-    severity_table = Table(title="Findings by Severity", show_header=True)
-    severity_table.add_column("Severity", style="bold")
-    severity_table.add_column("Count", justify="right")
-    
-    severity_colors = {
-        "CRITICAL": "bold red",
-        "HIGH": "red",
-        "MEDIUM": "yellow",
-        "LOW": "blue",
-        "INFO": "dim",
-    }
-    
-    for severity, count in result.findings_by_severity.items():
-        if count > 0:
-            color = severity_colors.get(severity, "white")
-            severity_table.add_row(
-                f"[{color}]{severity}[/{color}]",
-                f"[{color}]{count}[/{color}]"
-            )
-    
-    console.print(severity_table)
-    
-    # === FINDINGS DETAILS ===
+    # Findings details
     if result.findings:
         console.print()
         console.print("[bold]" + "="*70 + "[/bold]")
@@ -486,68 +454,29 @@ def _output_console(result, max_findings: int):
         console.print("[bold]" + "="*70 + "[/bold]")
         console.print()
         
+        severity_colors = {
+            "CRITICAL": "bold red",
+            "HIGH": "red",
+            "MEDIUM": "yellow",
+            "LOW": "blue",
+            "INFO": "dim",
+        }
+        
         for i, finding in enumerate(result.findings[:max_findings], 1):
             severity = finding.get("severity", "MEDIUM")
             color = severity_colors.get(severity, "white")
             
-            # Header
-            header = f"[bold]{i}. [{color}]{severity}[/{color}][/bold] {finding.get('title', 'No title')[:60]}"
-            
-            if finding.get("threat_level"):
-                threat = finding["threat_level"]
-                threat_color = severity_colors.get(threat, "white")
-                header += f" [{threat_color}]●{threat}[/{threat_color}]"
-            
-            console.print(header)
-            
-            # Details
-            file_name = Path(finding.get("file", "")).name
-            console.print(f"   [dim]File:[/dim] {file_name}:{finding.get('line', 0)}")
+            console.print(f"[bold]{i}. [{color}]{severity}[/{color}][/bold] {finding.get('title', 'No title')}")
+            console.print(f"   [dim]File:[/dim] {Path(finding.get('file', '')).name}:{finding.get('line', 0)}")
             console.print(f"   [dim]Rule:[/dim] {finding.get('rule_id', 'unknown')}")
             
             if finding.get("cwe_id"):
                 console.print(f"   [dim]CWE:[/dim] {finding['cwe_id']}")
             
-            # AI Analysis
-            if finding.get("llm_validated"):
-                confidence = finding.get("llm_confidence", 0.0)
-                exploitability = finding.get("llm_exploitability", "unknown")
-                
-                console.print(
-                    f"   [dim]🤖 AI:[/dim] Confidence: [green]{confidence:.2f}[/green] | "
-                    f"Exploitability: [{_get_exploit_color(exploitability)}]{exploitability}[/{_get_exploit_color(exploitability)}]"
-                )
-                
-                reasoning = finding.get("llm_reasoning", "")
-                if reasoning:
-                    short = reasoning[:100] + "..." if len(reasoning) > 100 else reasoning
-                    console.print(f"   [dim]   Reason:[/dim] {short}")
-            
-            # CVE Intelligence
-            if finding.get("cve_enriched"):
-                cve_count = finding.get("cve_count", 0)
-                max_cvss = finding.get("max_cvss", 0)
-                
-                console.print(f"   [dim]📋 CVE:[/dim] {cve_count} related | Max CVSS: {max_cvss:.1f}/10")
-                
-                if finding.get("cisa_kev"):
-                    kev_count = len(finding.get("cisa_kev_cves", []))
-                    console.print(f"   [bold red]🚨 CISA KEV: {kev_count} actively exploited![/bold red]")
-                
-                if finding.get("exploit_available"):
-                    exploit_count = finding.get("exploit_count", 0)
-                    console.print(f"   [yellow]💥 Exploits: {exploit_count} available[/yellow]")
-                
-                related_cves = finding.get("related_cves", [])
-                if related_cves:
-                    top_cve = related_cves[0]
-                    console.print(f"   [dim]   Top:[/dim] {top_cve['cve_id']} (CVSS: {top_cve.get('cvss_score', 'N/A')})")
-            
-            # Code snippet
             snippet = finding.get("code_snippet", "").strip()
             if snippet:
-                if len(snippet) > 100:
-                    snippet = snippet[:97] + "..."
+                if len(snippet) > 80:
+                    snippet = snippet[:77] + "..."
                 console.print(f"   [dim]Code:[/dim] [yellow]{snippet}[/yellow]")
             
             console.print()
@@ -556,7 +485,7 @@ def _output_console(result, max_findings: int):
             remaining = len(result.findings) - max_findings
             console.print(f"[dim]... and {remaining} more findings[/dim]")
     
-    # === FOOTER ===
+    # Footer
     console.print("[bold]" + "="*70 + "[/bold]")
     
     if result.total_findings == 0:
@@ -568,18 +497,6 @@ def _output_console(result, max_findings: int):
         )
     
     console.print()
-
-
-def _get_exploit_color(exploitability: str) -> str:
-    """Get color for exploitability level."""
-    colors = {
-        "critical": "bold red",
-        "high": "red",
-        "medium": "yellow",
-        "low": "blue",
-        "none": "green",
-    }
-    return colors.get(exploitability.lower(), "white")
 
 
 def _output_json(result, output_file: str = None):
@@ -608,7 +525,27 @@ def _output_json(result, output_file: str = None):
         console.print(json_str)
 
 
-# === CONFIG COMMANDS ===
+def _output_sarif(result, output_file: str = None):
+    """Output results in SARIF format for GitHub Code Scanning."""
+    try:
+        from ..github.sarif_generator import generate_sarif
+        sarif_data = generate_sarif(result)
+        sarif_str = json.dumps(sarif_data, indent=2)
+        
+        if output_file:
+            Path(output_file).write_text(sarif_str)
+            console.print(f"[green]✅ SARIF results written to {output_file}[/green]")
+        else:
+            console.print(sarif_str)
+    except ImportError:
+        console.print("[red]❌ SARIF generation not available[/red]")
+        console.print("[yellow]Install with: pip install securescan-ai[github][/yellow]")
+        sys.exit(1)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CONFIG COMMANDS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @cli.group()
 def config():
@@ -689,13 +626,16 @@ def validate(config_file):
         cfg = init_config(Path(config_file))
         console.print("[green]✅ Configuration is valid![/green]\n")
         
-        import yaml
-        config_dict = cfg.to_dict()
-        yaml_str = yaml.dump(config_dict, default_flow_style=False, sort_keys=False)
-        
-        from rich.syntax import Syntax
-        syntax = Syntax(yaml_str, "yaml", theme="monokai")
-        console.print(syntax)
+        try:
+            import yaml
+            config_dict = cfg.to_dict()
+            yaml_str = yaml.dump(config_dict, default_flow_style=False, sort_keys=False)
+            
+            from rich.syntax import Syntax
+            syntax = Syntax(yaml_str, "yaml", theme="monokai")
+            console.print(syntax)
+        except ImportError:
+            console.print("[dim]Install PyYAML for prettier output: pip install pyyaml[/dim]")
     
     except (ConfigError, SecureScanError) as e:
         console.print(f"[red]❌ Validation failed:[/red]\n{e}\n")
@@ -716,7 +656,9 @@ def get(ctx, key):
         console.print(f"\n[cyan]{key}:[/cyan] [yellow]{value}[/yellow]\n")
 
 
-# === VERSION COMMAND ===
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# VERSION COMMAND
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @cli.command()
 def version():
@@ -725,9 +667,25 @@ def version():
     console.print(f"[bold cyan]SecureScan AI[/bold cyan] version [yellow]{VERSION}[/yellow]")
     console.print()
     console.print("[dim]Open Source Security Code Review Platform[/dim]")
-    console.print("[dim]https://github.com/your-org/securescan-ai[/dim]")
+    console.print("[dim]Combines SAST + AI + CVE Intelligence[/dim]")
+    console.print("[dim]https://github.com/saimani21/securescan-ai[/dim]")
     console.print()
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# REGISTER SETUP COMMAND (MUST BE AT END AFTER CLI IS DEFINED!)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+try:
+    from .setup import setup
+    cli.add_command(setup)
+except ImportError as e:
+    logger.warning(f"Setup command not available: {e}")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ENTRY POINT
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 if __name__ == "__main__":
     cli(obj={})
