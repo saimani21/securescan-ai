@@ -1,0 +1,6 @@
+include README.md
+include LICENSE
+include requirements/*.txt
+recursive-include src/securescan *.py
+recursive-include src/securescan *.yaml
+recursive-include src/securescan *.yml
