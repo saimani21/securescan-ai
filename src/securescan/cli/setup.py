@@ -47,7 +47,6 @@ def setup_api_keys():
     config_file = config_dir / 'config.yml'
     env_file = config_dir / '.env'
     
-    # Create config directory
     config_dir.mkdir(exist_ok=True)
     
     console.print("\n[bold cyan]API Key Setup[/bold cyan]")
@@ -90,7 +89,6 @@ def setup_api_keys():
         env_file.write_text(env_content)
         console.print(f"\n[green]✅ API keys saved to: {env_file}[/green]")
         
-        # Add to bashrc
         bashrc = Path.home() / '.bashrc'
         source_line = f'\n# SecureScan AI - Load API keys\n[ -f "{env_file}" ] && export $(cat "{env_file}" | xargs)\n'
         
@@ -131,7 +129,6 @@ def setup():
     # Test installation
     console.print("\n[bold]3️⃣  Testing Installation[/bold]")
     
-    # Create test file
     test_dir = Path('/tmp/securescan-test')
     test_dir.mkdir(exist_ok=True)
     test_file = test_dir / 'test.py'
@@ -145,16 +142,18 @@ def setup():
             text=True,
             timeout=30
         )
-        if result.returncode in [0, 1, 2]:  # 0=clean, 1=HIGH, 2=CRITICAL
+        if result.returncode in [0, 1, 2]:
             console.print("[green]✅ Test scan successful![/green]")
         else:
             console.print("[yellow]⚠️  Test scan completed with warnings[/yellow]")
     except Exception as e:
         console.print(f"[yellow]⚠️  Test scan failed: {e}[/yellow]")
     finally:
-        # Cleanup
         test_file.unlink(missing_ok=True)
-        test_dir.rmdir()
+        try:
+            test_dir.rmdir()
+        except:
+            pass
     
     # Final instructions
     console.print("\n" + "="*60)
@@ -164,7 +163,7 @@ def setup():
         "  # Basic scan (free)\n"
         "  secscan scan /path/to/code\n\n"
         "  # With AI validation\n"
-        "  secscan scan /path/to/code --llm openai --severity HIGH --severity CRITICAL\n\n"
+        "  secscan scan /path/to/code --llm openai\n\n"
         "  # Full pipeline\n"
         "  secscan scan /path/to/code --llm openai --enrich-cve\n\n"
         "[bold]Need help?[/bold]\n"

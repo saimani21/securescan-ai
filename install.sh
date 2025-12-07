@@ -33,8 +33,10 @@ if ! command -v pipx &> /dev/null; then
     fi
     pipx ensurepath
     export PATH="$HOME/.local/bin:$PATH"
+    echo "✅ pipx installed"
+else
+    echo "✅ pipx already installed"
 fi
-echo "✅ pipx installed"
 
 # Install Semgrep
 echo ""
@@ -43,7 +45,7 @@ if ! command -v semgrep &> /dev/null; then
     pipx install semgrep
     echo "✅ Semgrep installed"
 else
-    echo "✅ Semgrep already installed"
+    echo "✅ Semgrep already installed ($(semgrep --version))"
 fi
 
 # Install SecureScan AI
@@ -56,22 +58,26 @@ echo "✅ SecureScan AI installed"
 # Update PATH
 export PATH="$HOME/.local/bin:$PATH"
 
-# Run setup wizard
+# Installation complete
 echo ""
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║  ✅ Installation Complete!                                 ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""
-echo "5️⃣  Starting setup wizard..."
-echo ""
 
-# Check if running interactively
+# Run setup wizard if interactive
 if [ -t 0 ]; then
+    echo "5️⃣  Starting setup wizard..."
+    echo ""
     secscan setup
 else
     echo "⚠️  Non-interactive mode detected"
     echo "   Run 'secscan setup' manually to configure API keys"
+    echo ""
+    echo "Quick Start:"
+    echo "  secscan setup              # Configure API keys"
+    echo "  secscan scan /path/to/code # Run your first scan"
 fi
 
 echo ""
-echo "🎉 Setup complete! Run 'secscan --help' to get started"
+echo "🎉 Installation complete! Run 'secscan --help' to get started"

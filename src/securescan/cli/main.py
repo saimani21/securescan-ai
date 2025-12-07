@@ -14,6 +14,10 @@ from ..utils.logger import get_logger, setup_logging
 from ..utils.config import Config, init_config
 from ..utils.exceptions import SecureScanError, ConfigError, ScanError
 from ..version import VERSION
+from securescan.cli.setup import setup as setup_cmd
+
+# Register setup command
+
 try:
     from dotenv import load_dotenv
     load_dotenv()  # Auto-load .env from current directory
@@ -22,7 +26,7 @@ except ImportError:
 console = Console()
 logger = get_logger(__name__)
 
-
+cli.add_command(setup_cmd, name='setup')
 @click.group()
 @click.version_option(version=VERSION, prog_name="SecureScan AI")
 @click.option(
