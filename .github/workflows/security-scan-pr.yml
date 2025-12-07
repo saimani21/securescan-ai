@@ -1,0 +1,38 @@
+name: Security Scan (PR)
+
+on:
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    name: PR Security Review
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Run SecureScan AI on PR Changes
+        uses: ./.github/actions/securescan
+        with:
+          target: '.'
+          severity: 'MEDIUM,HIGH,CRITICAL'
+          fail-on: 'NONE'  # Don't block PRs, just inform
+          
+          enable-llm: 'true'
+          llm-provider: 'openai'
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          
+          enable-cve: 'true'
+          
+          comment-on-pr: 'true'
+          upload-sarif: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}

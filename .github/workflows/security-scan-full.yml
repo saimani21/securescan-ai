@@ -1,0 +1,56 @@
+name: Security Scan (Full)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Full Security Scan
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run SecureScan AI (Full Pipeline)
+        uses: ./.github/actions/securescan
+        with:
+          target: '.'
+          severity: 'HIGH,CRITICAL'
+          fail-on: 'HIGH'
+          
+          # AI Validation
+          enable-llm: 'true'
+          llm-provider: 'openai'
+          llm-model: 'gpt-4o'
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          
+          # CVE Enrichment
+          enable-cve: 'true'
+          nvd-api-key: ${{ secrets.NVD_API_KEY }}
+          
+          # Output
+          output-format: 'both'
+          upload-sarif: 'true'
+          comment-on-pr: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload Results as Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: securescan-results
+          path: |
+            securescan-results.json
+            securescan-results.sarif
+          retention-days: 30

@@ -1,0 +1,50 @@
+name: Test Action
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ test-action ]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  test-basic:
+    runs-on: ubuntu-latest
+    name: Test Basic Scan
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Test SecureScan Action (Basic)
+        uses: ./.github/actions/securescan
+        with:
+          target: './test_vuln_detect'
+          enable-llm: 'false'
+          enable-cve: 'false'
+          fail-on: 'NONE'
+  
+  test-full:
+    runs-on: ubuntu-latest
+    name: Test Full Pipeline
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Test SecureScan Action (Full)
+        uses: ./.github/actions/securescan
+        with:
+          target: './test_vuln_detect'
+          enable-llm: 'true'
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          enable-cve: 'true'
+          nvd-api-key: ${{ secrets.NVD_API_KEY }}
+          output-format: 'both'
+          fail-on: 'NONE'
+      
+      - name: Check Outputs
+        run: |
+          echo "Findings: ${{ steps.test.outputs.findings-count }}"
+          echo "Critical: ${{ steps.test.outputs.critical-count }}"
+          echo "High: ${{ steps.test.outputs.high-count }}"

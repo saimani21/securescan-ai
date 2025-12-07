@@ -1,0 +1,364 @@
+name: 'SecureScan AI'
+description: 'AI-powered security scanner with CVE intelligence and false positive filtering'
+author: 'SecureScan AI Team'
+
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  # Scan Configuration
+  target:
+    description: 'Directory or file to scan'
+    required: false
+    default: '.'
+  
+  severity:
+    description: 'Severity levels to report (comma-separated: LOW,MEDIUM,HIGH,CRITICAL)'
+    required: false
+    default: 'HIGH,CRITICAL'
+  
+  fail-on:
+    description: 'Fail the action if findings at this severity or higher (LOW, MEDIUM, HIGH, CRITICAL, or NONE)'
+    required: false
+    default: 'HIGH'
+  
+  max-findings:
+    description: 'Maximum number of findings to display in output'
+    required: false
+    default: '50'
+  
+  # LLM Configuration
+  enable-llm:
+    description: 'Enable AI/LLM validation to reduce false positives'
+    required: false
+    default: 'true'
+  
+  llm-provider:
+    description: 'LLM provider to use (openai or ollama)'
+    required: false
+    default: 'openai'
+  
+  llm-model:
+    description: 'LLM model to use (e.g., gpt-4o, gpt-4, gpt-3.5-turbo)'
+    required: false
+    default: 'gpt-4o'
+  
+  llm-confidence:
+    description: 'Minimum LLM confidence threshold (0.0-1.0)'
+    required: false
+    default: '0.7'
+  
+  openai-api-key:
+    description: 'OpenAI API key (required if llm-provider is openai)'
+    required: false
+  
+  # CVE Configuration
+  enable-cve:
+    description: 'Enable CVE enrichment with threat intelligence'
+    required: false
+    default: 'true'
+  
+  nvd-api-key:
+    description: 'NVD API key for higher rate limits (optional)'
+    required: false
+  
+  cve-max-per-finding:
+    description: 'Maximum CVEs to fetch per finding'
+    required: false
+    default: '10'
+  
+  # Output Configuration
+  output-format:
+    description: 'Output format (json, sarif, or both)'
+    required: false
+    default: 'sarif'
+  
+  sarif-file:
+    description: 'Path to SARIF output file'
+    required: false
+    default: 'securescan-results.sarif'
+  
+  json-file:
+    description: 'Path to JSON output file'
+    required: false
+    default: 'securescan-results.json'
+  
+  # GitHub Integration
+  upload-sarif:
+    description: 'Upload SARIF to GitHub Security tab'
+    required: false
+    default: 'true'
+  
+  comment-on-pr:
+    description: 'Post findings as PR comment'
+    required: false
+    default: 'true'
+  
+  github-token:
+    description: 'GitHub token for PR comments and SARIF upload'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  findings-count:
+    description: 'Total number of findings'
+    value: ${{ steps.scan.outputs.findings }}
+  
+  critical-count:
+    description: 'Number of critical findings'
+    value: ${{ steps.scan.outputs.critical }}
+  
+  high-count:
+    description: 'Number of high findings'
+    value: ${{ steps.scan.outputs.high }}
+  
+  medium-count:
+    description: 'Number of medium findings'
+    value: ${{ steps.scan.outputs.medium }}
+  
+  low-count:
+    description: 'Number of low findings'
+    value: ${{ steps.scan.outputs.low }}
+  
+  sarif-file:
+    description: 'Path to SARIF output file'
+    value: ${{ steps.scan.outputs.sarif-file }}
+  
+  json-file:
+    description: 'Path to JSON output file'
+    value: ${{ steps.scan.outputs.json-file }}
+  
+  scan-duration:
+    description: 'Scan duration in seconds'
+    value: ${{ steps.scan.outputs.duration }}
+  
+  llm-cost:
+    description: 'LLM validation cost in USD'
+    value: ${{ steps.scan.outputs.llm-cost }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install SecureScan AI
+      shell: bash
+      run: |
+        echo "📦 Installing SecureScan AI..."
+        pip install --quiet --upgrade pip
+        pip install --quiet securescan-ai
+        
+        # Verify installation
+        secscan --version
+    
+    - name: Run Security Scan
+      id: scan
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        NVD_API_KEY: ${{ inputs.nvd-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        echo "🔍 Starting SecureScan AI..."
+        echo "Target: ${{ inputs.target }}"
+        echo "Severity filter: ${{ inputs.severity }}"
+        echo "LLM enabled: ${{ inputs.enable-llm }}"
+        echo "CVE enrichment: ${{ inputs.enable-cve }}"
+        
+        # Build command
+        CMD="secscan scan ${{ inputs.target }}"
+        
+        # Add severity filter
+        IFS=',' read -ra SEVERITIES <<< "${{ inputs.severity }}"
+        for sev in "${SEVERITIES[@]}"; do
+          CMD="$CMD --severity $(echo $sev | xargs)"
+        done
+        
+        # Add LLM if enabled
+        if [ "${{ inputs.enable-llm }}" = "true" ]; then
+          CMD="$CMD --llm ${{ inputs.llm-provider }}"
+          CMD="$CMD --llm-model ${{ inputs.llm-model }}"
+          CMD="$CMD --llm-confidence ${{ inputs.llm-confidence }}"
+        fi
+        
+        # Add CVE enrichment if enabled
+        if [ "${{ inputs.enable-cve }}" = "true" ]; then
+          CMD="$CMD --enrich-cve"
+          CMD="$CMD --cve-max ${{ inputs.cve-max-per-finding }}"
+        fi
+        
+        # Add output formats
+        if [ "${{ inputs.output-format }}" = "sarif" ] || [ "${{ inputs.output-format }}" = "both" ]; then
+          CMD="$CMD --output sarif --output-file ${{ inputs.sarif-file }}"
+        fi
+        
+        if [ "${{ inputs.output-format }}" = "json" ] || [ "${{ inputs.output-format }}" = "both" ]; then
+          CMD="$CMD --output json --output-file ${{ inputs.json-file }}"
+        fi
+        
+        # Add fail-on
+        if [ "${{ inputs.fail-on }}" != "NONE" ]; then
+          CMD="$CMD --fail-on ${{ inputs.fail-on }}"
+        fi
+        
+        # Add max findings
+        CMD="$CMD --max-findings ${{ inputs.max-findings }}"
+        
+        echo "Running: $CMD"
+        
+        # Run scan and capture output
+        set +e
+        $CMD 2>&1 | tee scan_output.log
+        EXIT_CODE=$?
+        set -e
+        
+        # Parse results from JSON output
+        if [ -f "${{ inputs.json-file }}" ]; then
+          FINDINGS=$(jq -r '.total_findings // 0' ${{ inputs.json-file }})
+          CRITICAL=$(jq -r '.findings_by_severity.CRITICAL // 0' ${{ inputs.json-file }})
+          HIGH=$(jq -r '.findings_by_severity.HIGH // 0' ${{ inputs.json-file }})
+          MEDIUM=$(jq -r '.findings_by_severity.MEDIUM // 0' ${{ inputs.json-file }})
+          LOW=$(jq -r '.findings_by_severity.LOW // 0' ${{ inputs.json-file }})
+          DURATION=$(jq -r '.duration_seconds // 0' ${{ inputs.json-file }})
+          
+          # Extract LLM cost if available
+          LLM_COST=$(jq -r '.config.llm_validation.total_cost_usd // 0' ${{ inputs.json-file }})
+        else
+          FINDINGS=0
+          CRITICAL=0
+          HIGH=0
+          MEDIUM=0
+          LOW=0
+          DURATION=0
+          LLM_COST=0
+        fi
+        
+        # Set outputs
+        echo "findings=$FINDINGS" >> $GITHUB_OUTPUT
+        echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+        echo "high=$HIGH" >> $GITHUB_OUTPUT
+        echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+        echo "low=$LOW" >> $GITHUB_OUTPUT
+        echo "sarif-file=${{ inputs.sarif-file }}" >> $GITHUB_OUTPUT
+        echo "json-file=${{ inputs.json-file }}" >> $GITHUB_OUTPUT
+        echo "duration=$DURATION" >> $GITHUB_OUTPUT
+        echo "llm-cost=$LLM_COST" >> $GITHUB_OUTPUT
+        
+        # Summary
+        echo "✅ Scan complete!"
+        echo "📊 Results: $FINDINGS findings ($CRITICAL CRITICAL, $HIGH HIGH, $MEDIUM MEDIUM, $LOW LOW)"
+        echo "⏱️  Duration: ${DURATION}s"
+        if [ "$LLM_COST" != "0" ]; then
+          echo "💰 LLM Cost: \$$LLM_COST"
+        fi
+        
+        # Exit with scan exit code
+        exit $EXIT_CODE
+    
+    - name: Upload SARIF to Security Tab
+      if: inputs.upload-sarif == 'true' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+        category: securescan-ai
+    
+    - name: Comment on PR
+      if: inputs.comment-on-pr == 'true' && github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const scanResults = JSON.parse(fs.readFileSync('${{ inputs.json-file }}', 'utf8'));
+          
+          const findings = scanResults.total_findings || 0;
+          const critical = scanResults.findings_by_severity?.CRITICAL || 0;
+          const high = scanResults.findings_by_severity?.HIGH || 0;
+          const medium = scanResults.findings_by_severity?.MEDIUM || 0;
+          const low = scanResults.findings_by_severity?.LOW || 0;
+          
+          let emoji = '✅';
+          let status = 'No critical issues found';
+          
+          if (critical > 0) {
+            emoji = '🚨';
+            status = `Found ${critical} CRITICAL issue${critical > 1 ? 's' : ''}`;
+          } else if (high > 0) {
+            emoji = '⚠️';
+            status = `Found ${high} HIGH severity issue${high > 1 ? 's' : ''}`;
+          }
+          
+          let comment = `## ${emoji} SecureScan AI Results\n\n`;
+          comment += `**Status:** ${status}\n\n`;
+          comment += `### 📊 Summary\n\n`;
+          comment += `| Severity | Count |\n`;
+          comment += `|----------|-------|\n`;
+          if (critical > 0) comment += `| 🔴 CRITICAL | ${critical} |\n`;
+          if (high > 0) comment += `| 🟠 HIGH | ${high} |\n`;
+          if (medium > 0) comment += `| 🟡 MEDIUM | ${medium} |\n`;
+          if (low > 0) comment += `| 🔵 LOW | ${low} |\n`;
+          comment += `| **Total** | **${findings}** |\n\n`;
+          
+          // Add AI validation stats if available
+          if (scanResults.config?.llm_validation) {
+            const llm = scanResults.config.llm_validation;
+            comment += `### 🤖 AI Validation\n\n`;
+            comment += `- **Confirmed Vulnerable:** ${llm.confirmed_vulnerable}\n`;
+            comment += `- **False Positives Filtered:** ${llm.false_positives}\n`;
+            comment += `- **Average Confidence:** ${(llm.avg_confidence * 100).toFixed(1)}%\n`;
+            comment += `- **Cost:** $${llm.total_cost_usd.toFixed(4)}\n\n`;
+          }
+          
+          // Add CVE intelligence if available
+          if (scanResults.config?.cve_enrichment) {
+            const cve = scanResults.config.cve_enrichment;
+            comment += `### 📋 CVE Intelligence\n\n`;
+            comment += `- **CVEs Found:** ${cve.total_cves_found}\n`;
+            comment += `- **Avg CVSS:** ${cve.avg_cvss?.toFixed(1) || 'N/A'}/10\n`;
+            comment += `- **Max CVSS:** ${cve.max_cvss?.toFixed(1) || 'N/A'}/10\n`;
+            if (cve.findings_in_cisa_kev > 0) {
+              comment += `- **🚨 CISA KEV:** ${cve.findings_in_cisa_kev} actively exploited!\n`;
+            }
+            comment += `- **With Exploits:** ${cve.findings_with_exploits}\n\n`;
+          }
+          
+          // Add top 5 findings
+          if (scanResults.findings && scanResults.findings.length > 0) {
+            comment += `### 🔍 Top Findings\n\n`;
+            const topFindings = scanResults.findings.slice(0, 5);
+            topFindings.forEach((finding, index) => {
+              const sevEmoji = finding.severity === 'CRITICAL' ? '🔴' : 
+                               finding.severity === 'HIGH' ? '🟠' : 
+                               finding.severity === 'MEDIUM' ? '🟡' : '🔵';
+              comment += `${index + 1}. ${sevEmoji} **${finding.severity}** - ${finding.title}\n`;
+              comment += `   - File: \`${finding.file}:${finding.line}\`\n`;
+              if (finding.cwe_id) {
+                comment += `   - CWE: ${finding.cwe_id}\n`;
+              }
+              if (finding.llm_validation?.confidence) {
+                comment += `   - AI Confidence: ${(finding.llm_validation.confidence * 100).toFixed(0)}%\n`;
+              }
+              comment += `\n`;
+            });
+            
+            if (findings > 5) {
+              comment += `\n_... and ${findings - 5} more. Check the Security tab for full details._\n`;
+            }
+          }
+          
+          comment += `\n---\n`;
+          comment += `<sub>Powered by [SecureScan AI](https://github.com/your-org/securescan-ai) | `;
+          comment += `Duration: ${scanResults.duration_seconds?.toFixed(1)}s</sub>`;
+          
+          // Post comment
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });

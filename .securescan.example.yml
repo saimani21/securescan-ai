@@ -1,0 +1,20 @@
+# Project-specific SecureScan configuration
+# Copy to: .securescan.yml
+
+scan:
+  timeout: 180                   # Shorter timeout for this project
+  exclude_patterns:
+    - node_modules
+    - vendor
+    - tests/fixtures
+
+llm:
+  enabled: true                  # Always use AI for this project
+  confidence_threshold: 0.8      # Higher threshold
+
+cve:
+  enabled: true                  # Always enrich with CVE data
+
+output:
+  format: json                   # Always output JSON
+  verbose: true                  # Verbose logging

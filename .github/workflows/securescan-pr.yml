@@ -1,0 +1,42 @@
+name: Security Scan on PR
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  statuses: write
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    name: SecureScan AI Security Review
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run SecureScan AI
+        uses: ./
+        with:
+          target: '.'
+          severity: 'MEDIUM'
+          fail-on: 'HIGH'
+          enable-llm: 'true'
+          llm-provider: 'openai'
+          enrich-cve: 'true'
+          output-sarif: 'true'
+          comment-pr: 'true'
+          auto-label: 'true'
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          nvd-api-key: ${{ secrets.NVD_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: securescan-results.sarif

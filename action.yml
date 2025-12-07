@@ -1,0 +1,132 @@
+name: 'SecureScan AI'
+description: 'AI-powered security scanner with CVE intelligence and false positive reduction'
+author: 'Your Name'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  # Scan configuration
+  target:
+    description: 'Target directory to scan'
+    required: false
+    default: '.'
+  
+  severity:
+    description: 'Minimum severity level (CRITICAL, HIGH, MEDIUM, LOW, INFO)'
+    required: false
+    default: 'MEDIUM'
+  
+  fail-on:
+    description: 'Fail build on severity (CRITICAL, HIGH, MEDIUM, LOW, NONE)'
+    required: false
+    default: 'HIGH'
+  
+  # AI validation
+  enable-llm:
+    description: 'Enable AI validation to reduce false positives'
+    required: false
+    default: 'false'
+  
+  llm-provider:
+    description: 'LLM provider (openai, ollama)'
+    required: false
+    default: 'openai'
+  
+  llm-model:
+    description: 'LLM model to use'
+    required: false
+    default: 'gpt-4o'
+  
+  # CVE enrichment
+  enrich-cve:
+    description: 'Enable CVE enrichment from NVD'
+    required: false
+    default: 'false'
+  
+  # Output configuration
+  output-sarif:
+    description: 'Upload SARIF to GitHub Security tab'
+    required: false
+    default: 'true'
+  
+  comment-pr:
+    description: 'Comment scan results on PR'
+    required: false
+    default: 'true'
+  
+  auto-label:
+    description: 'Automatically add labels to PR'
+    required: false
+    default: 'true'
+  
+  # Secrets
+  openai-api-key:
+    description: 'OpenAI API key (required if enable-llm=true)'
+    required: false
+  
+  nvd-api-key:
+    description: 'NVD API key (optional, increases rate limit)'
+    required: false
+  
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+    default: ${{ github.token }}
+
+outputs:
+  findings-count:
+    description: 'Total number of findings'
+  
+  critical-count:
+    description: 'Number of CRITICAL findings'
+  
+  high-count:
+    description: 'Number of HIGH findings'
+  
+  medium-count:
+    description: 'Number of MEDIUM findings'
+  
+  low-count:
+    description: 'Number of LOW findings'
+  
+  scan-passed:
+    description: 'Whether scan passed based on fail-on threshold'
+  
+  sarif-file:
+    description: 'Path to generated SARIF file'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install SecureScan AI
+      shell: bash
+      run: |
+        pip install --upgrade pip
+        pip install securescan-ai
+    
+    - name: Run Security Scan
+      id: scan
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        NVD_API_KEY: ${{ inputs.nvd-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        python ${{ github.action_path }}/run_scan.py \
+          --target "${{ inputs.target }}" \
+          --severity "${{ inputs.severity }}" \
+          --fail-on "${{ inputs.fail-on }}" \
+          --enable-llm "${{ inputs.enable-llm }}" \
+          --llm-provider "${{ inputs.llm-provider }}" \
+          --llm-model "${{ inputs.llm-model }}" \
+          --enrich-cve "${{ inputs.enrich-cve }}" \
+          --output-sarif "${{ inputs.output-sarif }}" \
+          --comment-pr "${{ inputs.comment-pr }}" \
+          --auto-label "${{ inputs.auto-label }}"
